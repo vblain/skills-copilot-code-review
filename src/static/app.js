@@ -1,5 +1,4 @@
 document.addEventListener("DOMContentLoaded", () => {
-  // DOM elements
   const activitiesList = document.getElementById("activities-list");
   const messageDiv = document.getElementById("message");
   const registrationModal = document.getElementById("registration-modal");
@@ -8,14 +7,12 @@ document.addEventListener("DOMContentLoaded", () => {
   const activityInput = document.getElementById("activity");
   const closeRegistrationModal = document.querySelector(".close-modal");
 
-  // Search and filter elements
   const searchInput = document.getElementById("activity-search");
   const searchButton = document.getElementById("search-button");
   const categoryFilters = document.querySelectorAll(".category-filter");
   const dayFilters = document.querySelectorAll(".day-filter");
   const timeFilters = document.querySelectorAll(".time-filter");
 
-  // Authentication elements
   const loginButton = document.getElementById("login-button");
   const userInfo = document.getElementById("user-info");
   const displayName = document.getElementById("display-name");
@@ -25,7 +22,35 @@ document.addEventListener("DOMContentLoaded", () => {
   const closeLoginModal = document.querySelector(".close-login-modal");
   const loginMessage = document.getElementById("login-message");
 
-  // Activity categories with corresponding colors
+  const announcementBanner = document.getElementById("announcement-banner");
+  const announcementText = document.getElementById("announcement-text");
+  const manageAnnouncementsButton = document.getElementById(
+    "manage-announcements-button"
+  );
+  const announcementsModal = document.getElementById("announcements-modal");
+  const closeAnnouncementsModal = document.querySelector(
+    ".close-announcements-modal"
+  );
+  const announcementsList = document.getElementById("announcements-list");
+  const announcementForm = document.getElementById("announcement-form");
+  const announcementFormId = document.getElementById("announcement-id");
+  const announcementFormMessage = document.getElementById(
+    "announcement-message"
+  );
+  const announcementFormStartDate = document.getElementById(
+    "announcement-start-date"
+  );
+  const announcementFormExpirationDate = document.getElementById(
+    "announcement-expiration-date"
+  );
+  const announcementCancelEdit = document.getElementById(
+    "announcement-cancel-edit"
+  );
+  const announcementSubmit = document.getElementById("announcement-submit");
+  const announcementManagerMessage = document.getElementById(
+    "announcement-manager-message"
+  );
+
   const activityTypes = {
     sports: { label: "Sports", color: "#e8f5e9", textColor: "#2e7d32" },
     arts: { label: "Arts", color: "#f3e5f5", textColor: "#7b1fa2" },
@@ -34,90 +59,339 @@ document.addEventListener("DOMContentLoaded", () => {
     technology: { label: "Technology", color: "#e8eaf6", textColor: "#3949ab" },
   };
 
-  // State for activities and filters
+  const timeRanges = {
+    morning: { start: "06:00", end: "08:00" },
+    afternoon: { start: "15:00", end: "18:00" },
+    weekend: { days: ["Saturday", "Sunday"] },
+  };
+
   let allActivities = {};
+  let activeAnnouncements = [];
+  let managerAnnouncements = [];
   let currentFilter = "all";
   let searchQuery = "";
   let currentDay = "";
   let currentTimeRange = "";
-
-  // Authentication state
   let currentUser = null;
 
-  // Time range mappings for the dropdown
-  const timeRanges = {
-    morning: { start: "06:00", end: "08:00" }, // Before school hours
-    afternoon: { start: "15:00", end: "18:00" }, // After school hours
-    weekend: { days: ["Saturday", "Sunday"] }, // Weekend days
-  };
+  function escapeHtml(value) {
+    return value
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/\"/g, "&quot;")
+      .replace(/'/g, "&#39;");
+  }
 
-  // Initialize filters from active elements
+  function formatDateForDisplay(dateValue) {
+    if (!dateValue) {
+      return "Starts immediately";
+    }
+
+    const date = new Date(`${dateValue}T00:00:00`);
+    return date.toLocaleDateString(undefined, {
+      month: "short",
+      day: "numeric",
+      year: "numeric",
+    });
+  }
+
   function initializeFilters() {
-    // Initialize day filter
     const activeDayFilter = document.querySelector(".day-filter.active");
     if (activeDayFilter) {
       currentDay = activeDayFilter.dataset.day;
     }
 
-    // Initialize time filter
     const activeTimeFilter = document.querySelector(".time-filter.active");
     if (activeTimeFilter) {
       currentTimeRange = activeTimeFilter.dataset.time;
     }
   }
 
-  // Function to set day filter
-  function setDayFilter(day) {
-    currentDay = day;
-
-    // Update active class
-    dayFilters.forEach((btn) => {
-      if (btn.dataset.day === day) {
-        btn.classList.add("active");
-      } else {
-        btn.classList.remove("active");
-      }
-    });
-
-    fetchActivities();
+  function updateAuthBodyClass() {
+    if (currentUser) {
+      document.body.classList.remove("not-authenticated");
+      return;
+    }
+    document.body.classList.add("not-authenticated");
   }
 
-  // Function to set time range filter
-  function setTimeRangeFilter(timeRange) {
-    currentTimeRange = timeRange;
-
-    // Update active class
-    timeFilters.forEach((btn) => {
-      if (btn.dataset.time === timeRange) {
-        btn.classList.add("active");
-      } else {
-        btn.classList.remove("active");
-      }
-    });
-
-    fetchActivities();
+  function resetAnnouncementForm() {
+    announcementForm.reset();
+    announcementFormId.value = "";
+    announcementCancelEdit.classList.add("hidden");
+    announcementSubmit.textContent = "Save Announcement";
   }
 
-  // Check if user is already logged in (from localStorage)
-  function checkAuthentication() {
-    const savedUser = localStorage.getItem("currentUser");
-    if (savedUser) {
-      try {
-        currentUser = JSON.parse(savedUser);
-        updateAuthUI();
-        // Verify the stored user with the server
-        validateUserSession(currentUser.username);
-      } catch (error) {
-        console.error("Error parsing saved user", error);
-        logout(); // Clear invalid data
+  function showManagerMessage(text, type) {
+    announcementManagerMessage.textContent = text;
+    announcementManagerMessage.className = `message ${type}`;
+    announcementManagerMessage.classList.remove("hidden");
+
+    setTimeout(() => {
+      announcementManagerMessage.classList.add("hidden");
+    }, 4000);
+  }
+
+  async function fetchAnnouncements(includeExpired = false) {
+    try {
+      const params = new URLSearchParams();
+      if (includeExpired) {
+        params.set("include_expired", "true");
+        if (currentUser?.username) {
+          params.set("teacher_username", currentUser.username);
+        }
       }
+      const query = params.toString() ? `?${params.toString()}` : "";
+      const response = await fetch(`/announcements${query}`);
+      if (!response.ok) {
+        return [];
+      }
+
+      const data = await response.json();
+      return Array.isArray(data) ? data : [];
+    } catch (error) {
+      console.error("Error fetching announcements:", error);
+      return [];
+    }
+  }
+
+  async function refreshAnnouncementBanner() {
+    activeAnnouncements = await fetchAnnouncements(false);
+
+    if (activeAnnouncements.length === 0) {
+      announcementBanner.classList.add("hidden");
+      announcementText.textContent = "";
+      return;
     }
 
-    // Set authentication class on body
-    updateAuthBodyClass();
+    const bannerCopy = activeAnnouncements
+      .slice(0, 3)
+      .map((item) => item.message)
+      .join("  •  ");
+
+    announcementText.textContent = bannerCopy;
+    announcementBanner.classList.remove("hidden");
   }
 
-  // Validate user session with the server
+  async function refreshManagerAnnouncements() {
+    managerAnnouncements = await fetchAnnouncements(true);
+    renderAnnouncementManagerList();
+  }
+
+  function renderAnnouncementManagerList() {
+    if (managerAnnouncements.length === 0) {
+      announcementsList.innerHTML = `
+        <div class="announcement-empty-state">
+          <h5>No announcements yet</h5>
+          <p>Add your first announcement using the form above.</p>
+        </div>
+      `;
+      return;
+    }
+
+    announcementsList.innerHTML = managerAnnouncements
+      .map((item) => {
+        const safeId = escapeHtml(item.id);
+        const safeMessage = escapeHtml(item.message || "");
+        const startLabel = item.start_date
+          ? formatDateForDisplay(item.start_date)
+          : "Immediate";
+        const expirationLabel = formatDateForDisplay(item.expiration_date);
+
+        return `
+          <article class="announcement-item" data-announcement-id="${safeId}">
+            <p class="announcement-item-message">${safeMessage}</p>
+            <div class="announcement-item-meta">
+              <span><strong>Starts:</strong> ${startLabel}</span>
+              <span><strong>Expires:</strong> ${expirationLabel}</span>
+            </div>
+            <div class="announcement-item-actions">
+              <button class="announcement-edit-button" data-announcement-id="${safeId}">Edit</button>
+              <button class="announcement-delete-button" data-announcement-id="${safeId}">Delete</button>
+            </div>
+          </article>
+        `;
+      })
+      .join("");
+
+    announcementsList
+      .querySelectorAll(".announcement-edit-button")
+      .forEach((button) => {
+        button.addEventListener("click", () => {
+          startEditingAnnouncement(button.dataset.announcementId);
+        });
+      });
+
+    announcementsList
+      .querySelectorAll(".announcement-delete-button")
+      .forEach((button) => {
+        button.addEventListener("click", () => {
+          deleteAnnouncement(button.dataset.announcementId);
+        });
+      });
+  }
+
+  function startEditingAnnouncement(announcementId) {
+    const current = managerAnnouncements.find((item) => item.id === announcementId);
+    if (!current) {
+      return;
+    }
+
+    announcementFormId.value = current.id;
+    announcementFormMessage.value = current.message || "";
+    announcementFormStartDate.value = current.start_date || "";
+    announcementFormExpirationDate.value = current.expiration_date || "";
+    announcementCancelEdit.classList.remove("hidden");
+    announcementSubmit.textContent = "Update Announcement";
+    announcementFormMessage.focus();
+  }
+
+  async function saveAnnouncement(event) {
+    event.preventDefault();
+
+    if (!currentUser) {
+      showManagerMessage("Please sign in to manage announcements.", "error");
+      return;
+    }
+
+    const message = announcementFormMessage.value.trim();
+    const startDate = announcementFormStartDate.value;
+    const expirationDate = announcementFormExpirationDate.value;
+
+    if (!message || !expirationDate) {
+      showManagerMessage("Message and expiration date are required.", "error");
+      return;
+    }
+
+    const editingId = announcementFormId.value;
+    const query = new URLSearchParams({
+      message,
+      expiration_date: expirationDate,
+      teacher_username: currentUser.username,
+    });
+
+    if (startDate) {
+      query.set("start_date", startDate);
+    }
+
+    const endpoint = editingId
+      ? `/announcements/${encodeURIComponent(editingId)}?${query.toString()}`
+      : `/announcements?${query.toString()}`;
+    const method = editingId ? "PUT" : "POST";
+
+    try {
+      const response = await fetch(endpoint, { method });
+      const result = await response.json();
+
+      if (!response.ok) {
+        showManagerMessage(result.detail || "Unable to save announcement.", "error");
+        return;
+      }
+
+      showManagerMessage(
+        editingId ? "Announcement updated." : "Announcement created.",
+        "success"
+      );
+      resetAnnouncementForm();
+      await refreshManagerAnnouncements();
+      await refreshAnnouncementBanner();
+    } catch (error) {
+      console.error("Error saving announcement:", error);
+      showManagerMessage("Unable to save announcement right now.", "error");
+    }
+  }
+
+  async function deleteAnnouncement(announcementId) {
+    if (!currentUser) {
+      showManagerMessage("Please sign in to manage announcements.", "error");
+      return;
+    }
+
+    showConfirmationDialog("Delete this announcement?", async () => {
+      try {
+        const query = new URLSearchParams({
+          teacher_username: currentUser.username,
+        });
+        const response = await fetch(
+          `/announcements/${encodeURIComponent(announcementId)}?${query.toString()}`,
+          { method: "DELETE" }
+        );
+        const result = await response.json();
+
+        if (!response.ok) {
+          showManagerMessage(result.detail || "Unable to delete announcement.", "error");
+          return;
+        }
+
+        showManagerMessage("Announcement deleted.", "success");
+        if (announcementFormId.value === announcementId) {
+          resetAnnouncementForm();
+        }
+        await refreshManagerAnnouncements();
+        await refreshAnnouncementBanner();
+      } catch (error) {
+        console.error("Error deleting announcement:", error);
+        showManagerMessage("Unable to delete announcement right now.", "error");
+      }
+    });
+  }
+
+  function openAnnouncementsModal() {
+    if (!currentUser) {
+      showMessage("Please sign in to manage announcements.", "error");
+      return;
+    }
+
+    announcementsModal.classList.remove("hidden");
+    setTimeout(() => {
+      announcementsModal.classList.add("show");
+    }, 10);
+    resetAnnouncementForm();
+    refreshManagerAnnouncements();
+  }
+
+  function closeAnnouncementsModalHandler() {
+    announcementsModal.classList.remove("show");
+    setTimeout(() => {
+      announcementsModal.classList.add("hidden");
+      resetAnnouncementForm();
+    }, 300);
+  }
+
+  function setDayFilter(day) {
+    currentDay = day;
+    dayFilters.forEach((btn) => {
+      btn.classList.toggle("active", btn.dataset.day === day);
+    });
+    fetchActivities();
+  }
+
+  function setTimeRangeFilter(timeRange) {
+    currentTimeRange = timeRange;
+    timeFilters.forEach((btn) => {
+      btn.classList.toggle("active", btn.dataset.time === timeRange);
+    });
+    fetchActivities();
+  }
+
+  function checkAuthentication() {
+    const savedUser = localStorage.getItem("currentUser");
+    if (!savedUser) {
+      updateAuthUI();
+      return;
+    }
+
+    try {
+      currentUser = JSON.parse(savedUser);
+      updateAuthUI();
+      validateUserSession(currentUser.username);
+    } catch (error) {
+      console.error("Error parsing saved user", error);
+      logout(false);
+    }
+  }
+
   async function validateUserSession(username) {
     try {
       const response = await fetch(
@@ -125,12 +399,10 @@ document.addEventListener("DOMContentLoaded", () => {
       );
 
       if (!response.ok) {
-        // Session invalid, log out
-        logout();
+        logout(false);
         return;
       }
 
-      // Session is valid, update user data
       const userData = await response.json();
       currentUser = userData;
       localStorage.setItem("currentUser", JSON.stringify(userData));
@@ -140,33 +412,27 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   }
 
-  // Update UI based on authentication state
   function updateAuthUI() {
     if (currentUser) {
       loginButton.classList.add("hidden");
       userInfo.classList.remove("hidden");
+      manageAnnouncementsButton.classList.remove("hidden");
       displayName.textContent = currentUser.display_name;
     } else {
       loginButton.classList.remove("hidden");
       userInfo.classList.add("hidden");
+      manageAnnouncementsButton.classList.add("hidden");
       displayName.textContent = "";
+
+      if (!announcementsModal.classList.contains("hidden")) {
+        closeAnnouncementsModalHandler();
+      }
     }
 
     updateAuthBodyClass();
-    // Refresh the activities to update the UI
     fetchActivities();
   }
 
-  // Update body class for CSS targeting
-  function updateAuthBodyClass() {
-    if (currentUser) {
-      document.body.classList.remove("not-authenticated");
-    } else {
-      document.body.classList.add("not-authenticated");
-    }
-  }
-
-  // Login function
   async function login(username, password) {
     try {
       const response = await fetch(
@@ -179,16 +445,11 @@ document.addEventListener("DOMContentLoaded", () => {
       );
 
       const data = await response.json();
-
       if (!response.ok) {
-        showLoginMessage(
-          data.detail || "Invalid username or password",
-          "error"
-        );
+        showLoginMessage(data.detail || "Invalid username or password", "error");
         return false;
       }
 
-      // Login successful
       currentUser = data;
       localStorage.setItem("currentUser", JSON.stringify(data));
       updateAuthUI();
@@ -202,22 +463,22 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   }
 
-  // Logout function
-  function logout() {
+  function logout(showStatusMessage = true) {
     currentUser = null;
     localStorage.removeItem("currentUser");
     updateAuthUI();
-    showMessage("You have been logged out.", "info");
+
+    if (showStatusMessage) {
+      showMessage("You have been logged out.", "info");
+    }
   }
 
-  // Show message in login modal
   function showLoginMessage(text, type) {
     loginMessage.textContent = text;
     loginMessage.className = `message ${type}`;
     loginMessage.classList.remove("hidden");
   }
 
-  // Open login modal
   function openLoginModal() {
     loginModal.classList.remove("hidden");
     loginModal.classList.add("show");
@@ -225,7 +486,6 @@ document.addEventListener("DOMContentLoaded", () => {
     loginForm.reset();
   }
 
-  // Close login modal
   function closeLoginModalHandler() {
     loginModal.classList.remove("show");
     setTimeout(() => {
@@ -234,32 +494,9 @@ document.addEventListener("DOMContentLoaded", () => {
     }, 300);
   }
 
-  // Event listeners for authentication
-  loginButton.addEventListener("click", openLoginModal);
-  logoutButton.addEventListener("click", logout);
-  closeLoginModal.addEventListener("click", closeLoginModalHandler);
-
-  // Close login modal when clicking outside
-  window.addEventListener("click", (event) => {
-    if (event.target === loginModal) {
-      closeLoginModalHandler();
-    }
-  });
-
-  // Handle login form submission
-  loginForm.addEventListener("submit", async (event) => {
-    event.preventDefault();
-    const username = document.getElementById("username").value;
-    const password = document.getElementById("password").value;
-    await login(username, password);
-  });
-
-  // Show loading skeletons
   function showLoadingSkeletons() {
     activitiesList.innerHTML = "";
-
-    // Create more skeleton cards to fill the screen since they're smaller now
-    for (let i = 0; i < 9; i++) {
+    for (let i = 0; i < 9; i += 1) {
       const skeletonCard = document.createElement("div");
       skeletonCard.className = "skeleton-card";
       skeletonCard.innerHTML = `
@@ -278,33 +515,24 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   }
 
-  // Format schedule for display - handles both old and new format
   function formatSchedule(details) {
-    // If schedule_details is available, use the structured data
     if (details.schedule_details) {
       const days = details.schedule_details.days.join(", ");
-
-      // Convert 24h time format to 12h AM/PM format for display
       const formatTime = (time24) => {
-        const [hours, minutes] = time24.split(":").map((num) => parseInt(num));
+        const [hours, minutes] = time24.split(":").map(Number);
         const period = hours >= 12 ? "PM" : "AM";
-        const displayHours = hours % 12 || 12; // Convert 0 to 12 for 12 AM
-        return `${displayHours}:${minutes
-          .toString()
-          .padStart(2, "0")} ${period}`;
+        const displayHours = hours % 12 || 12;
+        return `${displayHours}:${minutes.toString().padStart(2, "0")} ${period}`;
       };
 
-      const startTime = formatTime(details.schedule_details.start_time);
-      const endTime = formatTime(details.schedule_details.end_time);
-
-      return `${days}, ${startTime} - ${endTime}`;
+      return `${days}, ${formatTime(details.schedule_details.start_time)} - ${formatTime(
+        details.schedule_details.end_time
+      )}`;
     }
 
-    // Fallback to the string format if schedule_details isn't available
     return details.schedule;
   }
 
-  // Function to determine activity type (this would ideally come from backend)
   function getActivityType(activityName, description) {
     const name = activityName.toLowerCase();
     const desc = description.toLowerCase();
@@ -319,7 +547,9 @@ document.addEventListener("DOMContentLoaded", () => {
       desc.includes("athletic")
     ) {
       return "sports";
-    } else if (
+    }
+
+    if (
       name.includes("art") ||
       name.includes("music") ||
       name.includes("theater") ||
@@ -328,7 +558,9 @@ document.addEventListener("DOMContentLoaded", () => {
       desc.includes("paint")
     ) {
       return "arts";
-    } else if (
+    }
+
+    if (
       name.includes("science") ||
       name.includes("math") ||
       name.includes("academic") ||
@@ -339,14 +571,18 @@ document.addEventListener("DOMContentLoaded", () => {
       desc.includes("competition")
     ) {
       return "academic";
-    } else if (
+    }
+
+    if (
       name.includes("volunteer") ||
       name.includes("community") ||
       desc.includes("service") ||
       desc.includes("volunteer")
     ) {
       return "community";
-    } else if (
+    }
+
+    if (
       name.includes("computer") ||
       name.includes("coding") ||
       name.includes("tech") ||
@@ -359,48 +595,31 @@ document.addEventListener("DOMContentLoaded", () => {
       return "technology";
     }
 
-    // Default to "academic" if no match
     return "academic";
   }
 
-  // Function to fetch activities from API with optional day and time filters
   async function fetchActivities() {
-    // Show loading skeletons first
     showLoadingSkeletons();
 
     try {
-      // Build query string with filters if they exist
-      let queryParams = [];
+      const queryParams = [];
 
-      // Handle day filter
       if (currentDay) {
         queryParams.push(`day=${encodeURIComponent(currentDay)}`);
       }
 
-      // Handle time range filter
       if (currentTimeRange) {
         const range = timeRanges[currentTimeRange];
-
-        // Handle weekend special case
-        if (currentTimeRange === "weekend") {
-          // Don't add time parameters for weekend filter
-          // Weekend filtering will be handled on the client side
-        } else if (range) {
-          // Add time parameters for before/after school
+        if (currentTimeRange !== "weekend" && range) {
           queryParams.push(`start_time=${encodeURIComponent(range.start)}`);
           queryParams.push(`end_time=${encodeURIComponent(range.end)}`);
         }
       }
 
-      const queryString =
-        queryParams.length > 0 ? `?${queryParams.join("&")}` : "";
+      const queryString = queryParams.length > 0 ? `?${queryParams.join("&")}` : "";
       const response = await fetch(`/activities${queryString}`);
       const activities = await response.json();
-
-      // Save the activities data
       allActivities = activities;
-
-      // Apply search and filter, and handle weekend filter in client
       displayFilteredActivities();
     } catch (error) {
       activitiesList.innerHTML =
@@ -409,26 +628,18 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   }
 
-  // Function to display filtered activities
   function displayFilteredActivities() {
-    // Clear the activities list
     activitiesList.innerHTML = "";
-
-    // Apply client-side filtering - this handles category filter and search, plus weekend filter
-    let filteredActivities = {};
+    const filteredActivities = {};
 
     Object.entries(allActivities).forEach(([name, details]) => {
       const activityType = getActivityType(name, details.description);
-
-      // Apply category filter
       if (currentFilter !== "all" && activityType !== currentFilter) {
         return;
       }
 
-      // Apply weekend filter if selected
       if (currentTimeRange === "weekend" && details.schedule_details) {
-        const activityDays = details.schedule_details.days;
-        const isWeekendActivity = activityDays.some((day) =>
+        const isWeekendActivity = details.schedule_details.days.some((day) =>
           timeRanges.weekend.days.includes(day)
         );
 
@@ -437,25 +648,19 @@ document.addEventListener("DOMContentLoaded", () => {
         }
       }
 
-      // Apply search filter
       const searchableContent = [
         name.toLowerCase(),
         details.description.toLowerCase(),
         formatSchedule(details).toLowerCase(),
       ].join(" ");
 
-      if (
-        searchQuery &&
-        !searchableContent.includes(searchQuery.toLowerCase())
-      ) {
+      if (searchQuery && !searchableContent.includes(searchQuery.toLowerCase())) {
         return;
       }
 
-      // Activity passed all filters, add to filtered list
       filteredActivities[name] = details;
     });
 
-    // Check if there are any results
     if (Object.keys(filteredActivities).length === 0) {
       activitiesList.innerHTML = `
         <div class="no-results">
@@ -466,25 +671,21 @@ document.addEventListener("DOMContentLoaded", () => {
       return;
     }
 
-    // Display filtered activities
     Object.entries(filteredActivities).forEach(([name, details]) => {
       renderActivityCard(name, details);
     });
   }
 
-  // Function to render a single activity card
   function renderActivityCard(name, details) {
     const activityCard = document.createElement("div");
     activityCard.className = "activity-card";
 
-    // Calculate spots and capacity
     const totalSpots = details.max_participants;
     const takenSpots = details.participants.length;
     const spotsLeft = totalSpots - takenSpots;
     const capacityPercentage = (takenSpots / totalSpots) * 100;
     const isFull = spotsLeft <= 0;
 
-    // Determine capacity status class
     let capacityStatusClass = "capacity-available";
     if (isFull) {
       capacityStatusClass = "capacity-full";
@@ -492,22 +693,19 @@ document.addEventListener("DOMContentLoaded", () => {
       capacityStatusClass = "capacity-near-full";
     }
 
-    // Determine activity type
     const activityType = getActivityType(name, details.description);
     const typeInfo = activityTypes[activityType];
 
-    // Format the schedule using the new helper function
-    const formattedSchedule = formatSchedule(details);
-
-    // Create activity tag
-    const tagHtml = `
+    activityCard.innerHTML = `
       <span class="activity-tag" style="background-color: ${typeInfo.color}; color: ${typeInfo.textColor}">
         ${typeInfo.label}
       </span>
-    `;
-
-    // Create capacity indicator
-    const capacityIndicator = `
+      <h4>${name}</h4>
+      <p>${details.description}</p>
+      <p class="tooltip">
+        <strong>Schedule:</strong> ${formatSchedule(details)}
+        <span class="tooltip-text">Regular meetings at this time throughout the semester</span>
+      </p>
       <div class="capacity-container ${capacityStatusClass}">
         <div class="capacity-bar-bg">
           <div class="capacity-bar-fill" style="width: ${capacityPercentage}%"></div>
@@ -517,17 +715,6 @@ document.addEventListener("DOMContentLoaded", () => {
           <span>${spotsLeft} spots left</span>
         </div>
       </div>
-    `;
-
-    activityCard.innerHTML = `
-      ${tagHtml}
-      <h4>${name}</h4>
-      <p>${details.description}</p>
-      <p class="tooltip">
-        <strong>Schedule:</strong> ${formattedSchedule}
-        <span class="tooltip-text">Regular meetings at this time throughout the semester</span>
-      </p>
-      ${capacityIndicator}
       <div class="participants-list">
         <h5>Current Participants:</h5>
         <ul>
@@ -555,104 +742,36 @@ document.addEventListener("DOMContentLoaded", () => {
       <div class="activity-card-actions">
         ${
           currentUser
-            ? `
-          <button class="register-button" data-activity="${name}" ${
+            ? `<button class="register-button" data-activity="${name}" ${
                 isFull ? "disabled" : ""
-              }>
-            ${isFull ? "Activity Full" : "Register Student"}
-          </button>
-        `
-            : `
-          <div class="auth-notice">
-            Teachers can register students.
-          </div>
-        `
+              }>${isFull ? "Activity Full" : "Register Student"}</button>`
+            : '<div class="auth-notice">Teachers can register students.</div>'
         }
       </div>
     `;
 
-    // Add click handlers for delete buttons
-    const deleteButtons = activityCard.querySelectorAll(".delete-participant");
-    deleteButtons.forEach((button) => {
+    activityCard.querySelectorAll(".delete-participant").forEach((button) => {
       button.addEventListener("click", handleUnregister);
     });
 
-    // Add click handler for register button (only when authenticated)
-    if (currentUser) {
-      const registerButton = activityCard.querySelector(".register-button");
-      if (!isFull) {
-        registerButton.addEventListener("click", () => {
-          openRegistrationModal(name);
-        });
-      }
+    if (currentUser && !isFull) {
+      activityCard.querySelector(".register-button").addEventListener("click", () => {
+        openRegistrationModal(name);
+      });
     }
 
     activitiesList.appendChild(activityCard);
   }
 
-  // Event listeners for search and filter
-  searchInput.addEventListener("input", (event) => {
-    searchQuery = event.target.value;
-    displayFilteredActivities();
-  });
-
-  searchButton.addEventListener("click", (event) => {
-    event.preventDefault();
-    searchQuery = searchInput.value;
-    displayFilteredActivities();
-  });
-
-  // Add event listeners to category filter buttons
-  categoryFilters.forEach((button) => {
-    button.addEventListener("click", () => {
-      // Update active class
-      categoryFilters.forEach((btn) => btn.classList.remove("active"));
-      button.classList.add("active");
-
-      // Update current filter and display filtered activities
-      currentFilter = button.dataset.category;
-      displayFilteredActivities();
-    });
-  });
-
-  // Add event listeners to day filter buttons
-  dayFilters.forEach((button) => {
-    button.addEventListener("click", () => {
-      // Update active class
-      dayFilters.forEach((btn) => btn.classList.remove("active"));
-      button.classList.add("active");
-
-      // Update current day filter and fetch activities
-      currentDay = button.dataset.day;
-      fetchActivities();
-    });
-  });
-
-  // Add event listeners for time filter buttons
-  timeFilters.forEach((button) => {
-    button.addEventListener("click", () => {
-      // Update active class
-      timeFilters.forEach((btn) => btn.classList.remove("active"));
-      button.classList.add("active");
-
-      // Update current time filter and fetch activities
-      currentTimeRange = button.dataset.time;
-      fetchActivities();
-    });
-  });
-
-  // Open registration modal
   function openRegistrationModal(activityName) {
     modalActivityName.textContent = activityName;
     activityInput.value = activityName;
     registrationModal.classList.remove("hidden");
-    // Add slight delay to trigger animation
     setTimeout(() => {
       registrationModal.classList.add("show");
     }, 10);
   }
 
-  // Close registration modal
   function closeRegistrationModalHandler() {
     registrationModal.classList.remove("show");
     setTimeout(() => {
@@ -661,22 +780,7 @@ document.addEventListener("DOMContentLoaded", () => {
     }, 300);
   }
 
-  // Event listener for close button
-  closeRegistrationModal.addEventListener(
-    "click",
-    closeRegistrationModalHandler
-  );
-
-  // Close modal when clicking outside of it
-  window.addEventListener("click", (event) => {
-    if (event.target === registrationModal) {
-      closeRegistrationModalHandler();
-    }
-  });
-
-  // Create and show confirmation dialog
   function showConfirmationDialog(message, confirmCallback) {
-    // Create the confirmation dialog if it doesn't exist
     let confirmDialog = document.getElementById("confirm-dialog");
     if (!confirmDialog) {
       confirmDialog = document.createElement("div");
@@ -687,86 +791,54 @@ document.addEventListener("DOMContentLoaded", () => {
           <h3>Confirm Action</h3>
           <p id="confirm-message"></p>
           <div style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px;">
-            <button id="cancel-button" class="cancel-btn">Cancel</button>
-            <button id="confirm-button" class="confirm-btn">Confirm</button>
+            <button id="cancel-button" class="secondary-button">Cancel</button>
+            <button id="confirm-button" class="danger-button">Confirm</button>
           </div>
         </div>
       `;
       document.body.appendChild(confirmDialog);
-
-      // Style the buttons
-      const cancelBtn = confirmDialog.querySelector("#cancel-button");
-      const confirmBtn = confirmDialog.querySelector("#confirm-button");
-
-      cancelBtn.style.backgroundColor = "#f1f1f1";
-      cancelBtn.style.color = "#333";
-
-      confirmBtn.style.backgroundColor = "#dc3545";
-      confirmBtn.style.color = "white";
     }
 
-    // Set the message
-    const confirmMessage = document.getElementById("confirm-message");
-    confirmMessage.textContent = message;
-
-    // Show the dialog
+    document.getElementById("confirm-message").textContent = message;
     confirmDialog.classList.remove("hidden");
     setTimeout(() => {
       confirmDialog.classList.add("show");
     }, 10);
 
-    // Handle button clicks
     const cancelButton = document.getElementById("cancel-button");
     const confirmButton = document.getElementById("confirm-button");
 
-    // Remove any existing event listeners
-    const newCancelButton = cancelButton.cloneNode(true);
-    const newConfirmButton = confirmButton.cloneNode(true);
-    cancelButton.parentNode.replaceChild(newCancelButton, cancelButton);
-    confirmButton.parentNode.replaceChild(newConfirmButton, confirmButton);
+    const cancelClone = cancelButton.cloneNode(true);
+    const confirmClone = confirmButton.cloneNode(true);
+    cancelButton.parentNode.replaceChild(cancelClone, cancelButton);
+    confirmButton.parentNode.replaceChild(confirmClone, confirmButton);
 
-    // Add new event listeners
-    newCancelButton.addEventListener("click", () => {
+    cancelClone.addEventListener("click", () => {
       confirmDialog.classList.remove("show");
       setTimeout(() => {
         confirmDialog.classList.add("hidden");
       }, 300);
     });
 
-    newConfirmButton.addEventListener("click", () => {
+    confirmClone.addEventListener("click", () => {
       confirmCallback();
       confirmDialog.classList.remove("show");
       setTimeout(() => {
         confirmDialog.classList.add("hidden");
       }, 300);
     });
-
-    // Close when clicking outside
-    confirmDialog.addEventListener("click", (event) => {
-      if (event.target === confirmDialog) {
-        confirmDialog.classList.remove("show");
-        setTimeout(() => {
-          confirmDialog.classList.add("hidden");
-        }, 300);
-      }
-    });
   }
 
-  // Handle unregistration with confirmation
   async function handleUnregister(event) {
-    // Check if user is authenticated
     if (!currentUser) {
-      showMessage(
-        "You must be logged in as a teacher to unregister students.",
-        "error"
-      );
+      showMessage("You must be logged in as a teacher to unregister students.", "error");
       return;
     }
 
-    const activity = event.target.dataset.activity;
-    const email = event.target.dataset.email;
+    const trigger = event.currentTarget;
+    const activity = trigger.dataset.activity;
+    const email = trigger.dataset.email;
 
-    // Show confirmation dialog
     showConfirmationDialog(
       `Are you sure you want to unregister ${email} from ${activity}?`,
       async () => {
@@ -777,20 +849,17 @@ document.addEventListener("DOMContentLoaded", () => {
             )}/unregister?email=${encodeURIComponent(
               email
             )}&teacher_username=${encodeURIComponent(currentUser.username)}`,
-            {
-              method: "POST",
-            }
+            { method: "POST" }
           );
 
           const result = await response.json();
-
           if (response.ok) {
             showMessage(result.message, "success");
-            // Refresh the activities list
             fetchActivities();
-          } else {
-            showMessage(result.detail || "An error occurred", "error");
+            return;
           }
+
+          showMessage(result.detail || "An error occurred", "error");
         } catch (error) {
           showMessage("Failed to unregister. Please try again.", "error");
           console.error("Error unregistering:", error);
@@ -799,28 +868,56 @@ document.addEventListener("DOMContentLoaded", () => {
     );
   }
 
-  // Show message function
   function showMessage(text, type) {
     messageDiv.textContent = text;
     messageDiv.className = `message ${type}`;
     messageDiv.classList.remove("hidden");
 
-    // Hide message after 5 seconds
     setTimeout(() => {
       messageDiv.classList.add("hidden");
     }, 5000);
   }
 
-  // Handle form submission
+  loginButton.addEventListener("click", openLoginModal);
+  logoutButton.addEventListener("click", () => logout(true));
+  closeLoginModal.addEventListener("click", closeLoginModalHandler);
+  manageAnnouncementsButton.addEventListener("click", openAnnouncementsModal);
+  closeAnnouncementsModal.addEventListener("click", closeAnnouncementsModalHandler);
+  closeRegistrationModal.addEventListener("click", closeRegistrationModalHandler);
+
+  window.addEventListener("click", (event) => {
+    if (event.target === loginModal) {
+      closeLoginModalHandler();
+    }
+
+    if (event.target === registrationModal) {
+      closeRegistrationModalHandler();
+    }
+
+    if (event.target === announcementsModal) {
+      closeAnnouncementsModalHandler();
+    }
+
+    const confirmDialog = document.getElementById("confirm-dialog");
+    if (confirmDialog && event.target === confirmDialog) {
+      confirmDialog.classList.remove("show");
+      setTimeout(() => {
+        confirmDialog.classList.add("hidden");
+      }, 300);
+    }
+  });
+
+  loginForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const username = document.getElementById("username").value;
+    const password = document.getElementById("password").value;
+    await login(username, password);
+  });
+
   signupForm.addEventListener("submit", async (event) => {
     event.preventDefault();
-
-    // Check if user is authenticated
     if (!currentUser) {
-      showMessage(
-        "You must be logged in as a teacher to register students.",
-        "error"
-      );
+      showMessage("You must be logged in as a teacher to register students.", "error");
       return;
     }
 
@@ -834,35 +931,72 @@ document.addEventListener("DOMContentLoaded", () => {
         )}/signup?email=${encodeURIComponent(
           email
         )}&teacher_username=${encodeURIComponent(currentUser.username)}`,
-        {
-          method: "POST",
-        }
+        { method: "POST" }
       );
 
       const result = await response.json();
-
       if (response.ok) {
         showMessage(result.message, "success");
         closeRegistrationModalHandler();
-        // Refresh the activities list after successful signup
         fetchActivities();
-      } else {
-        showMessage(result.detail || "An error occurred", "error");
+        return;
       }
+
+      showMessage(result.detail || "An error occurred", "error");
     } catch (error) {
       showMessage("Failed to sign up. Please try again.", "error");
       console.error("Error signing up:", error);
     }
   });
 
-  // Expose filter functions to window for future UI control
+  announcementForm.addEventListener("submit", saveAnnouncement);
+  announcementCancelEdit.addEventListener("click", resetAnnouncementForm);
+
+  searchInput.addEventListener("input", (event) => {
+    searchQuery = event.target.value;
+    displayFilteredActivities();
+  });
+
+  searchButton.addEventListener("click", (event) => {
+    event.preventDefault();
+    searchQuery = searchInput.value;
+    displayFilteredActivities();
+  });
+
+  categoryFilters.forEach((button) => {
+    button.addEventListener("click", () => {
+      categoryFilters.forEach((btn) => btn.classList.remove("active"));
+      button.classList.add("active");
+      currentFilter = button.dataset.category;
+      displayFilteredActivities();
+    });
+  });
+
+  dayFilters.forEach((button) => {
+    button.addEventListener("click", () => {
+      dayFilters.forEach((btn) => btn.classList.remove("active"));
+      button.classList.add("active");
+      currentDay = button.dataset.day;
+      fetchActivities();
+    });
+  });
+
+  timeFilters.forEach((button) => {
+    button.addEventListener("click", () => {
+      timeFilters.forEach((btn) => btn.classList.remove("active"));
+      button.classList.add("active");
+      currentTimeRange = button.dataset.time;
+      fetchActivities();
+    });
+  });
+
   window.activityFilters = {
     setDayFilter,
     setTimeRangeFilter,
   };
 
-  // Initialize app
   checkAuthentication();
   initializeFilters();
   fetchActivities();
+  refreshAnnouncementBanner();
 });
